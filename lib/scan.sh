@@ -1,14 +1,8 @@
 #!/bin/bash
-#
-# scan.sh - Port scanning module using nmap
-#
 
-# Source common functions
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-# shellcheck source=./common.sh
 source "$SCRIPT_DIR/common.sh"
 
-# Port scanning with nmap
 scan_ports() {
     local target="$1"
     local target_dir="$2"
@@ -17,7 +11,6 @@ scan_ports() {
     
     log_info "Starting port scanning for $target"
     
-    # Collect IP addresses to scan
     local ips_file="$target_dir/.scan_ips"
     collect_scan_targets "$target" "$subdomains_file" "$dns_file" "$ips_file"
     
@@ -30,13 +23,10 @@ scan_ports() {
     ip_count=$(wc -l < "$ips_file")
     log_info "Scanning $ip_count unique IP addresses"
     
-    # Perform nmap scan
     perform_nmap_scan "$ips_file" "$target_dir"
     
-    # Process results
     process_nmap_results "$target_dir"
     
-    # Cleanup
     rm -f "$ips_file"
     
     log_success "Port scanning completed"
@@ -44,7 +34,6 @@ scan_ports() {
     return 0
 }
 
-# Collect IP addresses for scanning
 collect_scan_targets() {
     local target="$1"
     local subdomains_file="$2"
@@ -53,20 +42,17 @@ collect_scan_targets() {
     
     > "$output_file"
     
-    # Get IPs from DNS enumeration results
     if [[ -f "$dns_file" ]]; then
         jq -r '.[] | select(.type == "A") | .value' "$dns_file" 2>/dev/null | \
             grep -E '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$' >> "$output_file"
     fi
     
-    # Resolve target domain directly if not in DNS results
     local target_ip
     target_ip=$(dig +short "$target" A 2>/dev/null | grep -E '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$' | head -1)
     if [[ -n "$target_ip" ]]; then
         echo "$target_ip" >> "$output_file"
     fi
     
-    # Resolve subdomains if DNS file doesn't exist
     if [[ ! -f "$dns_file" && -f "$subdomains_file" ]]; then
         log_info "Resolving subdomain IPs for scanning..."
         while IFS= read -r subdomain; do
@@ -78,51 +64,43 @@ collect_scan_targets() {
         done < "$subdomains_file"
     fi
     
-    # Remove duplicates and private IPs (optional - comment out to scan private ranges)
     sort -u "$output_file" | \
         grep -v -E '^(10\.|172\.(1[6-9]|2[0-9]|3[01])\.|192\.168\.|127\.|169\.254\.)' > "$output_file.tmp" && \
         mv "$output_file.tmp" "$output_file"
     
-    # If no public IPs found, include private IPs
     if [[ ! -s "$output_file" ]]; then
         log_warn "No public IPs found, including private ranges"
         sort -u "$output_file.orig" > "$output_file" 2>/dev/null || true
     fi
 }
 
-# Perform nmap scan
 perform_nmap_scan() {
     local ips_file="$1"
     local target_dir="$2"
     local nmap_output="$target_dir/nmap"
     
-    # Prepare nmap command
     local nmap_cmd="nmap"
     local nmap_args=()
     
-    # Basic arguments
-    nmap_args+=("-n")  # No DNS resolution
-    nmap_args+=("-T4") # Aggressive timing
-    nmap_args+=("-oG" "$nmap_output.gnmap")  # Greppable output
-    nmap_args+=("-oN" "$nmap_output.nmap")   # Normal output
+    nmap_args+=("-n")
+    nmap_args+=("-T4")
+    nmap_args+=("-oG" "$nmap_output.gnmap")
+    nmap_args+=("-oN" "$nmap_output.nmap")
     
-    # Port selection
     if [[ "${FAST_MODE:-false}" == "true" ]]; then
         log_info "Fast mode: scanning top 100 ports"
-        nmap_args+=("-F")  # Fast scan (top 100 ports)
+        nmap_args+=("-F")
     else
         log_info "Full mode: scanning top 1000 ports with service detection"
         nmap_args+=("--top-ports" "1000")
-        nmap_args+=("-sV")  # Service version detection
+        nmap_args+=("-sV")
     fi
     
-    # Add IP addresses from file
     nmap_args+=("-iL" "$ips_file")
     
     log_info "Running nmap scan..."
     log_debug "Command: $nmap_cmd ${nmap_args[*]}"
     
-    # Execute nmap scan
     if ! timeout $((MODULE_TIMEOUT * 2)) "$nmap_cmd" "${nmap_args[@]}" 2>/dev/null; then
         log_error "Nmap scan failed or timed out"
         return 1
@@ -131,7 +109,6 @@ perform_nmap_scan() {
     log_success "Nmap scan completed"
 }
 
-# Process nmap results into JSON format
 process_nmap_results() {
     local target_dir="$1"
     local gnmap_file="$target_dir/nmap.gnmap"
@@ -144,7 +121,6 @@ process_nmap_results() {
     
     log_info "Processing nmap results..."
     
-    # Parse greppable output and convert to JSON
     awk '
     BEGIN {
         print "["
@@ -152,27 +128,21 @@ process_nmap_results() {
     }
     
     /^Host:/ && /Ports:/ {
-        # Extract IP address
         ip = $2
         
-        # Extract status
         status = $3
         gsub(/[()]/, "", status)
         
-        # Extract ports section
         ports_start = index($0, "Ports: ") + 7
         ports_section = substr($0, ports_start)
         
-        # Remove trailing info
         gsub(/\t.*$/, "", ports_section)
         
-        # Split ports by comma
         split(ports_section, port_entries, ", ")
         
         for (i in port_entries) {
             if (port_entries[i] == "") continue
             
-            # Parse port entry: port/state/protocol/owner/service/rpc/version
             split(port_entries[i], port_parts, "/")
             
             if (length(port_parts) >= 3) {
@@ -182,7 +152,6 @@ process_nmap_results() {
                 service = (length(port_parts) >= 5) ? port_parts[5] : ""
                 version = (length(port_parts) >= 7) ? port_parts[7] : ""
                 
-                # Only include open ports
                 if (state == "open") {
                     if (!first) print ","
                     first = 0
@@ -206,7 +175,6 @@ process_nmap_results() {
     }
     ' "$gnmap_file" > "$json_file"
     
-    # Validate JSON
     if ! jq . "$json_file" >/dev/null 2>&1; then
         log_error "Generated invalid JSON, creating empty array"
         echo '[]' > "$json_file"
@@ -218,7 +186,6 @@ process_nmap_results() {
     log_info "Results saved to: $json_file"
 }
 
-# Generate port scan statistics
 generate_scan_stats() {
     local scan_file="$1"
     local target_dir="$2"
@@ -257,7 +224,6 @@ generate_scan_stats() {
     log_debug "Port scan statistics saved to: $stats_file"
 }
 
-# Quick port check for specific services
 quick_service_check() {
     local target="$1"
     local target_dir="$2"

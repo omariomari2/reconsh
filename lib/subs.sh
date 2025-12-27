@@ -1,14 +1,8 @@
 #!/bin/bash
-#
-# subs.sh - Subdomain enumeration module
-#
 
-# Source common functions
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-# shellcheck source=./common.sh
 source "$SCRIPT_DIR/common.sh"
 
-# Enumerate subdomains using passive sources
 enumerate_subdomains() {
     local target="$1"
     local target_dir="$2"
@@ -18,34 +12,27 @@ enumerate_subdomains() {
     
     log_info "Starting subdomain enumeration for $target"
     
-    # Validate domain
     if ! is_valid_domain "$target"; then
         log_error "Invalid domain format: $target"
         return 1
     fi
     
-    # Collect subdomains from multiple sources
     local temp_subs="$target_dir/.subdomains_temp"
     > "$temp_subs"
     
-    # Add the root domain
     echo "$target" >> "$temp_subs"
     
-    # Source 1: crt.sh Certificate Transparency
     log_info "Querying crt.sh for certificate transparency data..."
     query_crtsh "$target" "$cache_dir" >> "$temp_subs" || log_warn "crt.sh query failed"
     
     rate_limit 1 2
     
-    # Source 2: BufferOver DNS
     log_info "Querying BufferOver for DNS data..."
     query_bufferover "$target" "$cache_dir" >> "$temp_subs" || log_warn "BufferOver query failed"
     
-    # Process and clean results
     log_info "Processing and deduplicating results..."
     process_subdomains "$target" "$temp_subs" "$output_file"
     
-    # Cleanup
     rm -f "$temp_subs"
     
     local count
@@ -56,7 +43,6 @@ enumerate_subdomains() {
     return 0
 }
 
-# Query crt.sh for certificate transparency data
 query_crtsh() {
     local domain="$1"
     local cache_dir="$2"
@@ -73,7 +59,6 @@ query_crtsh() {
         sort -u
 }
 
-# Query BufferOver for DNS data
 query_bufferover() {
     local domain="$1"
     local cache_dir="$2"
@@ -89,31 +74,22 @@ query_bufferover() {
         sort -u
 }
 
-# Process and filter subdomains
 process_subdomains() {
     local root_domain="$1"
     local temp_file="$2"
     local output_file="$3"
     
-    # Clean, deduplicate, and filter subdomains
     cat "$temp_file" | \
-        # Remove empty lines and whitespace
         sed '/^\s*$/d' | \
         tr -d '\r' | \
-        # Convert to lowercase
         tr '[:upper:]' '[:lower:]' | \
-        # Remove wildcards and invalid characters
         sed 's/^\*\.//g' | \
         grep -E '^[a-zA-Z0-9.-]+$' | \
-        # Filter only subdomains of target
         grep -E "(^|\.)$root_domain$" | \
-        # Remove duplicates and sort
         sort -u | \
-        # Filter out common wildcards and invalid entries
         grep -v -E '^(\*|_|\.|-)' | \
         grep -v -E '(\*|\s)' > "$output_file"
     
-    # Add common subdomains to check if not already present
     local common_subs=("www" "mail" "ftp" "admin" "api" "dev" "test" "staging" "blog")
     for sub in "${common_subs[@]}"; do
         local full_sub="$sub.$root_domain"
@@ -122,11 +98,9 @@ process_subdomains() {
         fi
     done
     
-    # Final sort and dedupe
     sort -u "$output_file" -o "$output_file"
 }
 
-# Verify subdomains by attempting DNS resolution
 verify_subdomains() {
     local input_file="$1"
     local output_file="$2"
@@ -134,7 +108,6 @@ verify_subdomains() {
     
     log_info "Verifying subdomains with DNS resolution..."
     
-    # Function to check if subdomain resolves
     check_subdomain() {
         local subdomain="$1"
         if dig +short "$subdomain" A 2>/dev/null | grep -q '^[0-9]'; then
@@ -143,7 +116,6 @@ verify_subdomains() {
     }
     export -f check_subdomain
     
-    # Parallel verification
     cat "$input_file" | \
         parallel_exec "$threads" 'check_subdomain {}' > "$output_file"
     
@@ -152,7 +124,6 @@ verify_subdomains() {
     log_info "Verified $verified_count subdomains"
 }
 
-# Generate subdomain statistics
 generate_subdomain_stats() {
     local subdomains_file="$1"
     local target_dir="$2"

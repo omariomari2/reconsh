@@ -1,14 +1,8 @@
 #!/bin/bash
-#
-# probe.sh - HTTP/HTTPS probing module
-#
 
-# Source common functions
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-# shellcheck source=./common.sh
 source "$SCRIPT_DIR/common.sh"
 
-# HTTP probing with technology detection
 probe_http() {
     local target="$1"
     local target_dir="$2"
@@ -18,7 +12,6 @@ probe_http() {
     
     log_info "Starting HTTP probing for $target"
     
-    # Create list of hosts to probe
     local hosts_file="$target_dir/.probe_hosts"
     if [[ -f "$subdomains_file" ]]; then
         cat "$subdomains_file" > "$hosts_file"
@@ -26,7 +19,6 @@ probe_http() {
         echo "$target" > "$hosts_file"
     fi
     
-    # Add root domain if not present
     if ! grep -q "^$target$" "$hosts_file"; then
         echo "$target" >> "$hosts_file"
     fi
@@ -35,20 +27,16 @@ probe_http() {
     total_hosts=$(wc -l < "$hosts_file")
     log_info "Probing $total_hosts hosts for HTTP/HTTPS services"
     
-    # Clear output file
     > "$output_file"
     
-    # Probe hosts in parallel
     local current=0
     while IFS= read -r host; do
         ((current++))
         show_progress "$current" "$total_hosts" "hosts"
         
-        # Probe both HTTP and HTTPS
         probe_host_http "$host" >> "$output_file" &
         probe_host_https "$host" >> "$output_file" &
         
-        # Limit concurrent jobs
         if (( current % (threads / 2) == 0 )); then
             wait
         fi
@@ -57,10 +45,8 @@ probe_http() {
     wait
     clear_progress
     
-    # Remove empty lines and sort by host
     grep -v '^$' "$output_file" | sort > "$output_file.tmp" && mv "$output_file.tmp" "$output_file"
     
-    # Cleanup
     rm -f "$hosts_file"
     
     local probe_count
@@ -71,21 +57,18 @@ probe_http() {
     return 0
 }
 
-# Probe single host for HTTP
 probe_host_http() {
     local host="$1"
     local url="http://$host"
     probe_url "$url" "$host" "http"
 }
 
-# Probe single host for HTTPS
 probe_host_https() {
     local host="$1"
     local url="https://$host"
     probe_url "$url" "$host" "https"
 }
 
-# Probe a specific URL
 probe_url() {
     local url="$1"
     local host="$2"
@@ -96,7 +79,6 @@ probe_url() {
     temp_headers=$(mktemp)
     temp_body=$(mktemp)
     
-    # Perform HTTP request with headers and body capture
     local status_code final_url
     if curl -s -L \
             --max-time "$timeout" \
@@ -122,17 +104,14 @@ probe_url() {
         status_code=$(echo "$curl_output" | cut -d'|' -f1)
         final_url=$(echo "$curl_output" | cut -d'|' -f2)
         
-        # Only process successful responses
         if [[ "$status_code" =~ ^[1-5][0-9][0-9]$ ]]; then
             process_http_response "$host" "$scheme" "$url" "$final_url" "$status_code" "$temp_headers" "$temp_body"
         fi
     fi
     
-    # Cleanup
     rm -f "$temp_headers" "$temp_body"
 }
 
-# Process HTTP response and extract information
 process_http_response() {
     local host="$1"
     local scheme="$2"
@@ -142,7 +121,6 @@ process_http_response() {
     local headers_file="$6"
     local body_file="$7"
     
-    # Extract headers
     local server content_type content_length x_powered_by location
     server=$(grep -i '^server:' "$headers_file" | cut -d' ' -f2- | tr -d '\r\n' | head -1)
     content_type=$(grep -i '^content-type:' "$headers_file" | cut -d' ' -f2- | tr -d '\r\n' | head -1)
@@ -150,27 +128,22 @@ process_http_response() {
     x_powered_by=$(grep -i '^x-powered-by:' "$headers_file" | cut -d' ' -f2- | tr -d '\r\n' | head -1)
     location=$(grep -i '^location:' "$headers_file" | cut -d' ' -f2- | tr -d '\r\n' | head -1)
     
-    # Extract title from HTML
     local title
     if [[ -f "$body_file" ]]; then
         title=$(grep -i '<title>' "$body_file" | sed -e 's/<[^>]*>//g' | tr -d '\r\n' | head -1 | xargs)
-        # Limit title length
         if [[ ${#title} -gt 100 ]]; then
             title="${title:0:97}..."
         fi
     fi
     
-    # Get actual content length
     local actual_length=0
     if [[ -f "$body_file" ]]; then
         actual_length=$(wc -c < "$body_file" 2>/dev/null || echo 0)
     fi
     
-    # Detect technologies
     local technologies
     technologies=$(detect_technologies "$headers_file" "$body_file")
     
-    # Create JSON response
     jq -n \
         --arg timestamp "$(timestamp)" \
         --arg host "$host" \
@@ -204,15 +177,12 @@ process_http_response() {
         }'
 }
 
-# Detect web technologies from headers and body
 detect_technologies() {
     local headers_file="$1"
     local body_file="$2"
     local technologies=()
     
-    # Check headers for technology indicators
     if [[ -f "$headers_file" ]]; then
-        # Server header analysis
         local server_header
         server_header=$(grep -i '^server:' "$headers_file" | cut -d' ' -f2- | tr -d '\r\n' | head -1)
         if [[ -n "$server_header" ]]; then
@@ -224,7 +194,6 @@ detect_technologies() {
             esac
         fi
         
-        # X-Powered-By header
         local powered_by
         powered_by=$(grep -i '^x-powered-by:' "$headers_file" | cut -d' ' -f2- | tr -d '\r\n' | head -1)
         if [[ -n "$powered_by" ]]; then
@@ -235,7 +204,6 @@ detect_technologies() {
             esac
         fi
         
-        # Other headers
         if grep -qi '^x-drupal-cache:' "$headers_file"; then
             technologies+=("Drupal")
         fi
@@ -244,24 +212,19 @@ detect_technologies() {
         fi
     fi
     
-    # Check body for technology indicators (limited to avoid large file processing)
     if [[ -f "$body_file" ]] && ! is_file_too_large "$body_file" 1; then
-        # WordPress detection
         if grep -qi 'wp-content\|wp-includes\|wordpress' "$body_file"; then
             technologies+=("WordPress")
         fi
         
-        # Drupal detection
         if grep -qi 'drupal\|sites/default/files' "$body_file"; then
             technologies+=("Drupal")
         fi
         
-        # Joomla detection
         if grep -qi 'joomla\|/components/com_' "$body_file"; then
             technologies+=("Joomla")
         fi
         
-        # Framework detection
         if grep -qi 'react\|reactjs' "$body_file"; then
             technologies+=("React")
         fi
@@ -279,11 +242,9 @@ detect_technologies() {
         fi
     fi
     
-    # Remove duplicates and convert to JSON array
     printf '%s\n' "${technologies[@]}" | sort -u | json_array
 }
 
-# Generate HTTP probing statistics
 generate_probe_stats() {
     local probe_file="$1"
     local target_dir="$2"

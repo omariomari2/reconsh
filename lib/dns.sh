@@ -1,17 +1,10 @@
 #!/bin/bash
-#
-# dns.sh - DNS enumeration module
-#
 
-# Source common functions
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-# shellcheck source=./common.sh
 source "$SCRIPT_DIR/common.sh"
 
-# DNS record types to query
 DNS_RECORD_TYPES=("A" "AAAA" "CNAME" "MX" "NS" "TXT" "SOA")
 
-# Enumerate DNS records for target and subdomains
 enumerate_dns() {
     local target="$1"
     local target_dir="$2"
@@ -21,7 +14,6 @@ enumerate_dns() {
     
     log_info "Starting DNS enumeration for $target"
     
-    # Create list of domains to query
     local domains_file="$target_dir/.dns_targets"
     if [[ -f "$subdomains_file" ]]; then
         cat "$subdomains_file" > "$domains_file"
@@ -29,7 +21,6 @@ enumerate_dns() {
         echo "$target" > "$domains_file"
     fi
     
-    # Add root domain if not present
     if ! grep -q "^$target$" "$domains_file"; then
         echo "$target" >> "$domains_file"
     fi
@@ -38,7 +29,6 @@ enumerate_dns() {
     total_domains=$(wc -l < "$domains_file")
     log_info "Querying DNS records for $total_domains domains"
     
-    # Query DNS records in parallel
     local temp_results="$target_dir/.dns_results"
     > "$temp_results"
     
@@ -49,7 +39,6 @@ enumerate_dns() {
         
         query_domain_dns "$domain" >> "$temp_results" &
         
-        # Limit concurrent jobs
         if (( current % threads == 0 )); then
             wait
         fi
@@ -58,14 +47,11 @@ enumerate_dns() {
     wait
     clear_progress
     
-    # Convert results to JSON
     log_info "Processing DNS results..."
     process_dns_results "$temp_results" "$output_file"
     
-    # Attempt zone transfers
     attempt_zone_transfers "$target" "$target_dir"
     
-    # Cleanup
     rm -f "$domains_file" "$temp_results"
     
     log_success "DNS enumeration completed"
@@ -74,7 +60,6 @@ enumerate_dns() {
     return 0
 }
 
-# Query DNS records for a single domain
 query_domain_dns() {
     local domain="$1"
     local timestamp
@@ -86,7 +71,6 @@ query_domain_dns() {
         
         if [[ -n "$result" ]]; then
             while IFS= read -r record; do
-                # Clean up the record
                 record=$(echo "$record" | tr -d '\r' | xargs)
                 if [[ -n "$record" ]]; then
                     printf '%s\t%s\t%s\t%s\n' "$domain" "$record_type" "$record" "$timestamp"
@@ -96,7 +80,6 @@ query_domain_dns() {
     done
 }
 
-# Process DNS results into structured JSON
 process_dns_results() {
     local temp_results="$1"
     local output_file="$2"
@@ -106,7 +89,6 @@ process_dns_results() {
         return 0
     fi
     
-    # Convert tab-separated results to JSON
     awk -F'\t' '
     {
         domain = $1
@@ -114,7 +96,6 @@ process_dns_results() {
         value = $3
         timestamp = $4
         
-        # Escape quotes in value
         gsub(/"/, "\\\"", value)
         
         printf "{\"domain\":\"%s\",\"type\":\"%s\",\"value\":\"%s\",\"timestamp\":\"%s\"}\n", 
@@ -122,7 +103,6 @@ process_dns_results() {
     }' "$temp_results" | jq -s . > "$output_file"
 }
 
-# Attempt zone transfers on discovered name servers
 attempt_zone_transfers() {
     local target="$1"
     local target_dir="$2"
@@ -136,7 +116,6 @@ attempt_zone_transfers() {
         return 1
     fi
     
-    # Extract NS records
     local nameservers
     nameservers=$(jq -r '.[] | select(.type == "NS") | .value' "$dns_file" 2>/dev/null | sort -u)
     
@@ -151,7 +130,6 @@ attempt_zone_transfers() {
         if [[ -n "$ns" ]]; then
             log_debug "Attempting zone transfer from: $ns"
             
-            # Remove trailing dot if present
             ns=${ns%.}
             
             local axfr_result
@@ -178,7 +156,6 @@ attempt_zone_transfers() {
     fi
 }
 
-# Resolve IP addresses for domains
 resolve_ips() {
     local domains_file="$1"
     local output_file="$2"
@@ -186,7 +163,6 @@ resolve_ips() {
     
     log_info "Resolving IP addresses..."
     
-    # Function to resolve a single domain
     resolve_domain() {
         local domain="$1"
         local ipv4 ipv6
@@ -210,13 +186,11 @@ resolve_ips() {
     }
     export -f resolve_domain
     
-    # Parallel resolution
     cat "$domains_file" | \
         parallel_exec "$threads" 'resolve_domain {}' | \
         jq -s . > "$output_file"
 }
 
-# Generate DNS statistics
 generate_dns_stats() {
     local dns_file="$1"
     local target_dir="$2"

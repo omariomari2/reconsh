@@ -1,25 +1,17 @@
 #!/bin/bash
-#
-# osint.sh - OSINT data collection module
-#
 
-# Source common functions
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-# shellcheck source=./common.sh
 source "$SCRIPT_DIR/common.sh"
 
-# Collect OSINT data for target
 collect_osint() {
     local target="$1"
     local target_dir="$2"
     
     log_info "Starting OSINT collection for $target"
     
-    # Create OSINT subdirectory
     local osint_dir="$target_dir/osint"
     mkdir -p "$osint_dir"
     
-    # Collect various OSINT data sources
     collect_whois_data "$target" "$target_dir"
     collect_certificate_transparency "$target" "$osint_dir"
     collect_ip_information "$target" "$target_dir" "$osint_dir"
@@ -30,7 +22,6 @@ collect_osint() {
     return 0
 }
 
-# Collect WHOIS information
 collect_whois_data() {
     local target="$1"
     local target_dir="$2"
@@ -42,7 +33,6 @@ collect_whois_data() {
         if whois "$target" > "$whois_file" 2>/dev/null; then
             log_success "WHOIS data saved to: $whois_file"
             
-            # Extract key information to JSON
             extract_whois_json "$whois_file" "$target_dir/whois.json"
         else
             log_warn "WHOIS query failed for $target"
@@ -52,7 +42,6 @@ collect_whois_data() {
     fi
 }
 
-# Extract structured data from WHOIS
 extract_whois_json() {
     local whois_file="$1"
     local json_file="$2"
@@ -61,7 +50,6 @@ extract_whois_json() {
         return 1
     fi
     
-    # Extract common WHOIS fields
     local registrar creation_date expiry_date status nameservers
     
     registrar=$(grep -i "registrar:" "$whois_file" | head -1 | cut -d: -f2- | xargs)
@@ -69,7 +57,6 @@ extract_whois_json() {
     expiry_date=$(grep -iE "(expir|expires):" "$whois_file" | head -1 | cut -d: -f2- | xargs)
     status=$(grep -i "status:" "$whois_file" | head -1 | cut -d: -f2- | xargs)
     
-    # Extract nameservers
     local ns_array
     ns_array=$(grep -i "name server:" "$whois_file" | cut -d: -f2- | xargs -n1 | json_array)
     
@@ -90,7 +77,6 @@ extract_whois_json() {
         }' > "$json_file"
 }
 
-# Collect certificate transparency data
 collect_certificate_transparency() {
     local target="$1"
     local osint_dir="$2"
@@ -100,11 +86,9 @@ collect_certificate_transparency() {
     
     log_info "Collecting certificate transparency data..."
     
-    # Query crt.sh for certificate data
     local url="https://crt.sh/?q=$target&output=json"
     
     if cached_curl "$url" "$cache_dir" > "$ct_file.tmp" 2>/dev/null; then
-        # Process and clean CT data
         if jq . "$ct_file.tmp" >/dev/null 2>&1; then
             jq '[.[] | {
                 id: .id,
@@ -130,7 +114,6 @@ collect_certificate_transparency() {
     fi
 }
 
-# Collect IP information for resolved addresses
 collect_ip_information() {
     local target="$1"
     local target_dir="$2"
@@ -140,24 +123,20 @@ collect_ip_information() {
     
     log_info "Collecting IP information..."
     
-    # Collect unique IP addresses
     local ips_file="$target_dir/.osint_ips"
     > "$ips_file"
     
-    # Get IPs from DNS results
     if [[ -f "$dns_file" ]]; then
         jq -r '.[] | select(.type == "A") | .value' "$dns_file" 2>/dev/null | \
             grep -E '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$' >> "$ips_file"
     fi
     
-    # Add target IP if not in DNS results
     local target_ip
     target_ip=$(dig +short "$target" A 2>/dev/null | grep -E '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$' | head -1)
     if [[ -n "$target_ip" ]]; then
         echo "$target_ip" >> "$ips_file"
     fi
     
-    # Remove duplicates
     sort -u "$ips_file" -o "$ips_file"
     
     if [[ ! -s "$ips_file" ]]; then
@@ -168,21 +147,18 @@ collect_ip_information() {
     
     > "$ip_info_file"
     
-    # Query IP information (rate limited)
     local cache_dir
     cache_dir=$(create_cache_dir "$target_dir")
     
     while IFS= read -r ip; do
         log_debug "Looking up IP information for: $ip"
         
-        # Use ipinfo.io (no API key required, but rate limited)
         local url="https://ipinfo.io/$ip/json"
         
         if cached_curl "$url" "$cache_dir" 2>/dev/null | jq . >/dev/null 2>&1; then
             cached_curl "$url" "$cache_dir" 2>/dev/null | \
                 jq --arg timestamp "$(timestamp)" '. + {timestamp: $timestamp}' >> "$ip_info_file"
         else
-            # Fallback: create basic entry
             jq -n \
                 --arg ip "$ip" \
                 --arg timestamp "$(timestamp)" \
@@ -193,7 +169,6 @@ collect_ip_information() {
                 }' >> "$ip_info_file"
         fi
         
-        # Rate limiting for API
         rate_limit 2 4
     done < "$ips_file"
     
@@ -204,16 +179,12 @@ collect_ip_information() {
     log_success "Collected information for $ip_count IP addresses"
 }
 
-# Collect DNS history information
 collect_dns_history() {
     local target="$1"
     local osint_dir="$2"
     local history_file="$osint_dir/dns_history.json"
     
     log_info "Collecting DNS history..."
-    
-    # This would typically use services like SecurityTrails, but we'll create a placeholder
-    # for passive DNS data that could be integrated with various APIs
     
     jq -n \
         --arg timestamp "$(timestamp)" \
@@ -229,7 +200,6 @@ collect_dns_history() {
     log_info "DNS history placeholder created (requires API integration)"
 }
 
-# Collect social media and web presence information
 collect_web_presence() {
     local target="$1"
     local osint_dir="$2"
@@ -256,7 +226,6 @@ collect_web_presence() {
         rate_limit 1 2
     done
     
-    # Create JSON array
     local results_json="[]"
     if [[ ${#results[@]} -gt 0 ]]; then
         results_json=$(printf '%s\n' "${results[@]}" | jq -s .)
@@ -277,7 +246,6 @@ collect_web_presence() {
     log_info "Found $found_count social media profiles"
 }
 
-# Generate OSINT summary
 generate_osint_summary() {
     local target="$1"
     local osint_dir="$2"

@@ -1,31 +1,16 @@
 #!/bin/bash
-#
-# reconsh - Offensive Reconnaissance Toolkit
-# A modular Bash toolkit for domain-focused reconnaissance
-#
-# LEGAL DISCLAIMER:
-# This tool is for authorized security testing and educational purposes only.
-# Users are responsible for complying with applicable laws and obtaining proper
-# authorization before scanning any systems they do not own or have explicit
-# permission to test.
-#
 
 set -Eeuo pipefail
 
-# Script directory and library path
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 LIB_DIR="$(dirname "$SCRIPT_DIR")/lib"
 
-# Source common functions
-# shellcheck source=../lib/common.sh
 source "$LIB_DIR/common.sh"
 
-# Default configuration
 DEFAULT_THREADS=10
 DEFAULT_OUTDIR="out"
 DEFAULT_TIMEOUT=30
 
-# Global variables
 DOMAIN=""
 TARGETS_FILE=""
 THREADS="$DEFAULT_THREADS"
@@ -36,7 +21,6 @@ NO_CACHE=false
 MODULE_TIMEOUT="$DEFAULT_TIMEOUT"
 VERBOSE=false
 
-# Usage information
 usage() {
     cat << EOF
 reconsh - Offensive Reconnaissance Toolkit
@@ -78,7 +62,6 @@ LEGAL:
 EOF
 }
 
-# Parse command line arguments
 parse_args() {
     if [[ $# -eq 0 ]]; then
         usage
@@ -138,7 +121,6 @@ parse_args() {
         esac
     done
 
-    # Validate command
     case "$command" in
         check|subs|dns|probe|scan|osint|all)
             COMMAND="$command"
@@ -150,7 +132,6 @@ parse_args() {
             ;;
     esac
 
-    # Validate required arguments for most commands
     if [[ "$COMMAND" != "check" ]]; then
         if [[ -z "$DOMAIN" && -z "$TARGETS_FILE" ]]; then
             log_error "Either -d <domain> or -f <file> is required"
@@ -158,7 +139,6 @@ parse_args() {
         fi
     fi
 
-    # Validate numeric arguments
     if ! [[ "$THREADS" =~ ^[0-9]+$ ]] || [[ "$THREADS" -lt 1 ]]; then
         log_error "Invalid threads value: $THREADS"
         exit 1
@@ -170,7 +150,6 @@ parse_args() {
     fi
 }
 
-# Get target list from domain or file
 get_targets() {
     local targets=()
     
@@ -199,7 +178,6 @@ get_targets() {
     printf '%s\n' "${targets[@]}"
 }
 
-# Execute command for each target
 execute_command() {
     local targets
     readarray -t targets < <(get_targets)
@@ -209,7 +187,6 @@ execute_command() {
     for target in "${targets[@]}"; do
         log_info "Processing target: $target"
         
-        # Create output directory for target
         local target_dir="$OUTDIR/$target"
         mkdir -p "$target_dir"
         
@@ -239,25 +216,21 @@ execute_command() {
     done
 }
 
-# Run full reconnaissance workflow
 run_full_recon() {
     local target="$1"
     local target_dir="$2"
     
     log_info "Running full reconnaissance for $target"
     
-    # Run modules in sequence with caching
     run_subdomain_enum "$target" "$target_dir"
     run_dns_enum "$target" "$target_dir"
     run_http_probe "$target" "$target_dir"
     run_port_scan "$target" "$target_dir"
     run_osint "$target" "$target_dir"
     
-    # Generate summary
     generate_summary "$target" "$target_dir"
 }
 
-# Placeholder functions for modules (will be implemented in separate files)
 check_dependencies() {
     source "$LIB_DIR/common.sh"
     check_deps
@@ -305,9 +278,7 @@ generate_summary() {
     create_summary "$target" "$target_dir"
 }
 
-# Main execution
 main() {
-    # Show banner
     log_info "reconsh - Offensive Reconnaissance Toolkit"
     log_info "Use responsibly and only on authorized targets"
     echo
@@ -316,7 +287,6 @@ main() {
     execute_command
 }
 
-# Run main function if script is executed directly
 if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
     main "$@"
 fi

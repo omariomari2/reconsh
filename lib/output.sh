@@ -1,14 +1,8 @@
 #!/bin/bash
-#
-# output.sh - Output aggregation and summary generation
-#
 
-# Source common functions
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-# shellcheck source=./common.sh
 source "$SCRIPT_DIR/common.sh"
 
-# Create comprehensive summary of all reconnaissance data
 create_summary() {
     local target="$1"
     local target_dir="$2"
@@ -16,7 +10,6 @@ create_summary() {
     
     log_info "Generating comprehensive summary for $target"
     
-    # Collect data from all modules
     local subdomains_data dns_data probe_data scan_data osint_data
     
     subdomains_data=$(collect_subdomain_summary "$target_dir")
@@ -25,11 +18,9 @@ create_summary() {
     scan_data=$(collect_scan_summary "$target_dir")
     osint_data=$(collect_osint_summary "$target_dir")
     
-    # Generate executive summary
     local exec_summary
     exec_summary=$(generate_executive_summary "$target" "$target_dir")
     
-    # Create comprehensive summary JSON
     jq -n \
         --arg timestamp "$(timestamp)" \
         --arg target "$target" \
@@ -56,13 +47,11 @@ create_summary() {
     
     log_success "Summary generated: $summary_file"
     
-    # Generate human-readable report
     generate_text_report "$target" "$target_dir"
     
     return 0
 }
 
-# Collect subdomain enumeration summary
 collect_subdomain_summary() {
     local target_dir="$1"
     local subdomains_file="$target_dir/subdomains.txt"
@@ -75,7 +64,6 @@ collect_subdomain_summary() {
     local total_count depth_stats
     total_count=$(wc -l < "$subdomains_file" 2>/dev/null || echo 0)
     
-    # Calculate subdomain depth distribution
     depth_stats=$(awk -F. '{print NF-1}' "$subdomains_file" 2>/dev/null | \
         sort -n | uniq -c | \
         awk '{printf "{\"depth\":%d,\"count\":%d}\n", $2, $1}' | \
@@ -91,7 +79,6 @@ collect_subdomain_summary() {
         }'
 }
 
-# Collect DNS enumeration summary
 collect_dns_summary() {
     local target_dir="$1"
     local dns_file="$target_dir/dns.json"
@@ -118,7 +105,6 @@ collect_dns_summary() {
         }'
 }
 
-# Collect HTTP probing summary
 collect_probe_summary() {
     local target_dir="$1"
     local probe_file="$target_dir/probe.jsonl"
@@ -154,7 +140,6 @@ collect_probe_summary() {
         }'
 }
 
-# Collect port scanning summary
 collect_scan_summary() {
     local target_dir="$1"
     local scan_file="$target_dir/nmap.json"
@@ -190,7 +175,6 @@ collect_scan_summary() {
         }'
 }
 
-# Collect OSINT summary
 collect_osint_summary() {
     local target_dir="$1"
     local whois_file="$target_dir/whois.json"
@@ -226,7 +210,6 @@ collect_osint_summary() {
         }'
 }
 
-# Generate executive summary with key findings
 generate_executive_summary() {
     local target="$1"
     local target_dir="$2"
@@ -234,7 +217,6 @@ generate_executive_summary() {
     local findings=()
     local risk_level="low"
     
-    # Analyze subdomains
     local subdomain_count=0
     if [[ -f "$target_dir/subdomains.txt" ]]; then
         subdomain_count=$(wc -l < "$target_dir/subdomains.txt" 2>/dev/null || echo 0)
@@ -246,7 +228,6 @@ generate_executive_summary() {
         fi
     fi
     
-    # Analyze open ports
     local open_ports=0
     if [[ -f "$target_dir/nmap.json" ]]; then
         open_ports=$(jq 'length' "$target_dir/nmap.json" 2>/dev/null || echo 0)
@@ -261,7 +242,6 @@ generate_executive_summary() {
         fi
     fi
     
-    # Analyze HTTP services
     local http_services=0
     if [[ -f "$target_dir/probe.jsonl" ]]; then
         http_services=$(wc -l < "$target_dir/probe.jsonl" 2>/dev/null || echo 0)
@@ -270,7 +250,6 @@ generate_executive_summary() {
         fi
     fi
     
-    # Check for interesting technologies
     if [[ -f "$target_dir/probe.jsonl" ]]; then
         local admin_panels
         admin_panels=$(grep -i "admin\|login\|dashboard" "$target_dir/probe.jsonl" 2>/dev/null | wc -l || echo 0)
@@ -282,12 +261,10 @@ generate_executive_summary() {
         fi
     fi
     
-    # Default finding if nothing significant
     if [[ ${#findings[@]} -eq 0 ]]; then
         findings+=("Basic reconnaissance completed - limited exposure detected")
     fi
     
-    # Convert findings array to JSON
     local findings_json
     findings_json=$(printf '%s\n' "${findings[@]}" | json_array)
     
@@ -310,7 +287,6 @@ generate_executive_summary() {
         }'
 }
 
-# Generate human-readable text report
 generate_text_report() {
     local target="$1"
     local target_dir="$2"
@@ -333,7 +309,6 @@ EXECUTIVE SUMMARY
 
 EOF
     
-    # Add executive summary from JSON
     if [[ -f "$target_dir/summary.json" ]]; then
         jq -r '.executive_summary.key_findings[]' "$target_dir/summary.json" 2>/dev/null | \
             sed 's/^/- /' >> "$report_file"
@@ -412,7 +387,6 @@ EOF
     log_success "Text report generated: $report_file"
 }
 
-# Merge multiple JSON files into a single array
 merge_json_files() {
     local output_file="$1"
     shift
@@ -433,7 +407,6 @@ merge_json_files() {
     mv "$temp_file" "$output_file"
 }
 
-# Archive results for long-term storage
 archive_results() {
     local target="$1"
     local target_dir="$2"
