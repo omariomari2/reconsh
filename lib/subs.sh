@@ -30,6 +30,8 @@ enumerate_subdomains() {
     log_info "Querying BufferOver for DNS data..."
     query_bufferover "$target" "$cache_dir" >> "$temp_subs" || log_warn "BufferOver query failed"
     
+    run_native_bruteforce "$target" "$target_dir" >> "$temp_subs"
+    
     log_info "Processing and deduplicating results..."
     process_subdomains "$target" "$temp_subs" "$output_file"
     
@@ -41,6 +43,32 @@ enumerate_subdomains() {
     log_info "Results saved to: $output_file"
     
     return 0
+}
+
+run_native_bruteforce() {
+    local target="$1"
+    local target_dir="$2"
+    local bruteforce_bin="$SCRIPT_DIR/../bin/dns_brute"
+    local wordlist="$SCRIPT_DIR/../native/wordlists/default.txt"
+    
+    if [[ ! -x "$bruteforce_bin" ]]; then
+        log_debug "Native bruteforcer not found, skipping"
+        return 0
+    fi
+    
+    log_info "Running native DNS bruteforce..."
+    
+    local brute_args=("-d" "$target" "-t" "${THREADS:-50}" "-W")
+    
+    if [[ -f "$wordlist" ]]; then
+        brute_args+=("-w" "$wordlist")
+    fi
+    
+    if "$bruteforce_bin" "${brute_args[@]}" 2>/dev/null; then
+        log_success "Native bruteforce completed"
+    else
+        log_warn "Native bruteforce failed"
+    fi
 }
 
 query_crtsh() {
